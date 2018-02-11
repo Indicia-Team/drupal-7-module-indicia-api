@@ -225,7 +225,7 @@ function indicia_api_authorise_user() {
   if(filter_var($_SERVER['PHP_AUTH_USER'], FILTER_VALIDATE_EMAIL)) {
     // Email.
     $existing_user = user_load_by_mail($name);
-    
+
     // In case the username is an email and username != email
     if (empty($existing_user)) {
       $existing_user = user_load_by_name($name);
@@ -397,6 +397,11 @@ function indicia_api_validate_password($pass) {
   return strlen($pass) >= 0;
 }
 
+global $session_log;
+$session_log = [
+  "severity" => WATCHDOG_DEBUG,
+  "logs" => []
+];
 
 /**
  * Logs messages if in log mode.
@@ -404,6 +409,8 @@ function indicia_api_validate_password($pass) {
  * Messages go to the PHP error log and the Drupal error log.
  */
 function indicia_api_log($message, $variables = array(), $severity = WATCHDOG_NOTICE, $link = NULL) {
+  global $session_log;
+
   // Obtain log mode indicator.
   if (!isset($_SERVER['HTTP_X_API_KEY']) || empty($_SERVER['HTTP_X_API_KEY'])) {
     return;
@@ -416,22 +423,49 @@ function indicia_api_log($message, $variables = array(), $severity = WATCHDOG_NO
   $result_array = $result->fetchAll();
   $log_mode = $result_array[0]->log;
 
+  $now = DateTime::createFromFormat('U.u', microtime(true));
+  $timestamp = $now->format("H:i:s.u");
   switch ($log_mode) {
     case WATCHDOG_DEBUG:
       error_log($message);
-      watchdog("Indicia API", $message, $variables, $severity, $link);
+      $session_log['logs'][] = [$message, $severity, $timestamp];
+
+      if ($severity === WATCHDOG_ERROR) {
+        $session_log['severity'] = WATCHDOG_ERROR;
+      }
       break;
 
     case WATCHDOG_ERROR:
       if ($severity === WATCHDOG_ERROR) {
         error_log($message);
-        watchdog("Indicia API", $message, $variables, $severity, $link);
+        $session_log['severity'] = WATCHDOG_ERROR;
+        $session_log['logs'][] = [$message, $severity, $timestamp];
       }
       break;
 
     default:
   }
 }
+
+/**
+* Prints captured logs as a formatted message.
+*/
+function indicia_api_exit() {
+  global $session_log;
+  if (sizeof($session_log['logs']) == 0) {
+    return;
+  }
+
+  $messages = '';
+  forEach ($session_log['logs'] as $log) {
+   $severity = $log[1] === WATCHDOG_ERROR ? '!!ERR!!' : '';
+   $message = $log[0];
+   $timestamp = $log[2];
+   $messages .= $message . '</br>* ' . $severity . ' ' . $timestamp . '</br></br>'; // only messages since the module doesn't use vars for templates yet
+  }
+  watchdog("Indicia API", $messages, NULL, $session_log['severity']);
+}
+
 
 /**
  * Prints to log and returns a json formatted error back to the client.
