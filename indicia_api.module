@@ -226,7 +226,7 @@ function indicia_api_authorise_user() {
   if(filter_var($_SERVER['PHP_AUTH_USER'], FILTER_VALIDATE_EMAIL)) {
     // Email.
     $existing_user = user_load_by_mail($name);
-    
+
     // In case the username is an email and username != email
     if (empty($existing_user)) {
       $existing_user = user_load_by_name($name);
@@ -398,6 +398,11 @@ function indicia_api_validate_password($pass) {
   return strlen($pass) >= 0;
 }
 
+global $_indicia_api_session_log;
+$_indicia_api_session_log = [
+  "severity" => WATCHDOG_DEBUG,
+  "logs" => []
+];
 
 /**
  * Logs messages if in log mode.
@@ -405,6 +410,8 @@ function indicia_api_validate_password($pass) {
  * Messages go to the PHP error log and the Drupal error log.
  */
 function indicia_api_log($message, $variables = array(), $severity = WATCHDOG_NOTICE, $link = NULL, $log_mode = NULL) {
+  global $_indicia_api_session_log;
+
   if (!isset($log_mode)) {
     // Obtain log mode indicator.
     if (!isset($_SERVER['HTTP_X_API_KEY']) || empty($_SERVER['HTTP_X_API_KEY'])) {
@@ -418,22 +425,49 @@ function indicia_api_log($message, $variables = array(), $severity = WATCHDOG_NO
     $result_array = $result->fetchAll();
     $log_mode = $result_array[0]->log;
   }
-  
+
+  $now = DateTime::createFromFormat('U.u', microtime(TRUE));
+  $timestamp = $now->format("H:i:s.u");
   switch ($log_mode) {
     case WATCHDOG_DEBUG:
       error_log($message);
-      watchdog("Indicia API", $message, $variables, $severity, $link);
+      $_indicia_api_session_log['logs'][] = [$message, $severity, $timestamp];
+
+      if ($severity === WATCHDOG_ERROR) {
+        $_indicia_api_session_log['severity'] = WATCHDOG_ERROR;
+      }
       break;
 
     case WATCHDOG_ERROR:
       if ($severity === WATCHDOG_ERROR) {
         error_log($message);
-        watchdog("Indicia API", $message, $variables, $severity, $link);
+        $_indicia_api_session_log['severity'] = WATCHDOG_ERROR;
+        $_indicia_api_session_log['logs'][] = [$message, $severity, $timestamp];
       }
       break;
 
     default:
   }
+}
+
+/**
+ * Prints captured logs as a formatted message.
+ */
+function indicia_api_exit() {
+  global $_indicia_api_session_log;
+  if (count($_indicia_api_session_log['logs']) == 0) {
+    return;
+  }
+
+  $messages = '';
+  foreach ($_indicia_api_session_log['logs'] as $log) {
+    $message = $log[0];
+    $severity = $log[1] === WATCHDOG_ERROR ? '!!ERR!!' : '';
+    $timestamp = $log[2];
+    // Only messages since the module doesn't use vars for templates yet.
+    $messages .= $message . '</br>* ' . $severity . ' ' . $timestamp . '</br></br>';
+  }
+  watchdog("Indicia API", $messages, NULL, $_indicia_api_session_log['severity']);
 }
 
 /**
@@ -469,7 +503,6 @@ function error_print($code, $status, $title, $errors = NULL) {
     indicia_api_log(print_r($errors, 1), NULL, WATCHDOG_ERROR);
   }
 }
-
 
 // Allow to update own user record only.
 function ownAuthenticated($user, $silent = FALSE) {
