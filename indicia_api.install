@@ -87,8 +87,110 @@ function indicia_api_schema() {
     ),
     'primary key' => array('id'),
   );
-
+  
+  /* 
+   * Allows for a customised registration email to be sent by an app.
+   */
+  $schema['indicia_api_app_email'] = array(
+    'description' => 'Stores registration email for app.',
+    'fields' => array(
+      'id' => array(
+        'description' => 'The primary identifier for the key.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'no export' => TRUE,
+      ),
+      'subject' => array(
+        'description' => 'Override app registration email subject.',
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => false,
+      ),
+      'message' => array(
+        'description' => 'Override app registration email message.',
+        'type' => 'text',
+        'size' => 'normal',
+        'not null' => false,
+      ),
+      'created_by' => array(
+        'description' => 'User id that created the email override data.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => '0',
+      ),
+      'created' => array(
+        'description' => 'The Unix timestamp when the key was created.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'changed' => array(
+        'description' => 'The Unix timestamp when the key was most recently saved.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      )
+    ),
+    'primary key' => array('id'),
+  );
   return $schema;
+}
+
+/* 
+ * Allows for user to be upgrading module rather than installing from scratch.
+ */
+function indicia_api_update_7001() {
+  $schema['indicia_api_app_email'] = array(
+    'description' => 'Stores registration email for app.',
+    'fields' => array(
+      'id' => array(
+        'description' => 'The primary identifier for the key.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'no export' => TRUE,
+      ),
+      'subject' => array(
+        'description' => 'Override app registration email subject.',
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => false,
+      ),
+      'message' => array(
+        'description' => 'Override app registration email message.',
+        'type' => 'text',
+        'size' => 'normal',
+        'not null' => false,
+      ),
+      'created_by' => array(
+        'description' => 'User id that created the email override data.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => '0',
+      ),
+      'created' => array(
+        'description' => 'The Unix timestamp when the key was created.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'changed' => array(
+        'description' => 'The Unix timestamp when the key was most recently saved.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      )
+    ),
+    'primary key' => array('id'),
+  );
+  db_create_table('indicia_api_app_email', $schema['indicia_api_app_email']);
 }
 
 /**
