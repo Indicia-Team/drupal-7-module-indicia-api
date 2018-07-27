@@ -14,8 +14,7 @@ function user_activate($user) {
   $user = user_load(intval($uid));
   $user_obj = entity_metadata_wrapper('user', $user);
   $key = 'field_activation_token';
-  print($code);
-  if ($user_obj->$key->value() === $code) {
+  if (!empty($user_obj->$key) && $user_obj->$key->value() === $code) {
     // Values match so activate account.
     indicia_api_log("Activating user $uid with code $code.");
 

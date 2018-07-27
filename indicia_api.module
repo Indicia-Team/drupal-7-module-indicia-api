@@ -97,7 +97,8 @@ function indicia_api_menu() {
   $items[CONFIG_PATH] = array(
     'title' => 'Indicia API',
     'description' => 'Configure variables relating to the mobile authorisation module',
-    'page callback' => 'indicia_api_dashboard',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('indicia_api_dashboard'),
     'access arguments' => array('user mobile auth'),
     'file' => 'indicia_api.admin.inc',
   );
@@ -124,6 +125,14 @@ function indicia_api_menu() {
     'title' => 'Delete key',
     'page callback' => 'drupal_get_form',
     'page arguments' => array('indicia_api_delete', 5),
+    'access arguments' => array('user mobile auth'),
+    'file' => 'indicia_api.admin.inc',
+    'type' => MENU_CALLBACK,
+  );
+  $items[CONFIG_PATH . '/indicia_api_app_email'] = array(
+    'title' => 'Edit app resitration email',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('indicia_api_app_email'),
     'access arguments' => array('user mobile auth'),
     'file' => 'indicia_api.admin.inc',
     'type' => MENU_CALLBACK,
@@ -167,6 +176,20 @@ function indicia_api_key_load($id = NULL) {
   }
 
   return $keys;
+}
+
+/**
+ * Implements hook_load().
+ */
+function indicia_api_app_email_load($id = NULL) {  
+  //Collect data from database and convert to array
+  $appEmailFromDbObject = db_query("SELECT * FROM {indicia_api_app_email} ORDER BY subject"); 
+  $appEmailFromDbArray = array();
+  foreach ($appEmailFromDbObject as $resultLine) {
+    $appEmailFromDbArray[] = (array) $resultLine;
+  }
+  $appEmailFromDbArray[]=$appEmailFromDbArray;
+  return $appEmailFromDbArray;
 }
 
 /**
@@ -518,6 +541,9 @@ function ownAuthenticated($user, $silent = FALSE) {
 /**
  * Implements hook_mail().
  */
+/**
+ * Implements hook_mail().
+ */
 function indicia_api_mail($key, &$message, $params) {
   switch ($key) {
     case 'register':
@@ -525,10 +551,28 @@ function indicia_api_mail($key, &$message, $params) {
       $path = $base_url . '/' . API_PATH;
       $activation_url = "$path/users/{$params['uid']}/activate?" .
         "activationToken={$params['activation_token']}";
-      $subject = variable_get('indicia_api_registration_subject', "Welcome to !site");
-      $body = variable_get('indicia_api_registration_body',
-        "Activate your account by visiting the following page in your web browser: !activation_url");
-
+      // App email override currently only applies to register.
+      // Get the subject/message from database and convert to array ready for use
+      $appEmailFromDbObject = db_query("SELECT * FROM {indicia_api_app_email} ORDER BY subject");
+      $appEmailFromDbArray = array();
+      foreach ($appEmailFromDbObject as $resultLine) {
+        $appEmailFromDbArray[] = (array) $resultLine;
+      }
+      $appEmailFromDbArray[]=$appEmailFromDbArray;
+      // If both a custom subject and message exist then set the to be the subject and message of the mail.
+      // Then auto activate the account (as we skip the activation for app as user has already setup password on app)
+      if (!empty($appEmailFromDbArray[0]['subject']) && !empty($appEmailFromDbArray[0]['message'])) {
+        $subject = variable_get('indicia_api_registration_subject', $appEmailFromDbArray[0]['subject']);
+        $body = variable_get('indicia_api_registration_body', $appEmailFromDbArray[0]['message']);
+        $account = user_load_by_mail($message['to']);
+        $account->status=1;
+        user_save($account);
+      } else {
+        // If no customised subject/message then continue as normal
+        $subject = variable_get('indicia_api_registration_subject', "Welcome to !site");
+        $body = variable_get('indicia_api_registration_body',
+          "Activate your account by visiting the following page in your web browser: !activation_url");
+      }
       $message['subject'] = t($subject, array("!site" => variable_get('site_name', "Indicia")));
       $message['body'][] = t($body, array("!activation_url" => $activation_url));
       break;

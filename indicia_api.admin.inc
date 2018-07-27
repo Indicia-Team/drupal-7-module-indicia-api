@@ -6,6 +6,127 @@
  */
 
 /**
+ * 
+ * Form that allows customised registration email to be sent by an app
+ * @param type $form
+ * @param type $form_state
+ * @return form
+ */
+function indicia_api_app_email($form, &$form_state) {
+  // Form has Subject and Message boxes on it, so collect any existing data first from database
+  $existing_data=indicia_api_app_email_load();
+  if (!empty($existing_data[0]['subject'])) {
+    $default_subject=$existing_data[0]['subject'];
+  } else {
+    $default_subject='';  
+  }
+  if (!empty($existing_data[0]['message'])) {
+    $default_message=$existing_data[0]['message'];
+  } else {
+    $default_message='';  
+  }
+  $form['subject'] = array(
+    '#type' => 'textfield',
+    '#title' => t('App registration email subject override'),
+    '#description' => t('Override the standard Drupal suject for the registration email.'),
+    '#required' => FALSE,
+    '#default_value' => $default_subject
+  );
+  $form['message'] = array(
+    '#type' => 'textarea',
+    '#title' => t('App registration email message override'),
+    '#description' => t('Override the standard Drupal message for the registration email.'),
+    '#required' => FALSE,
+    '#default_value' => $default_message
+  );
+  if (!empty($existing_data[0]['id'])) {
+    // Editing entry
+    $form['id'] = array(
+      '#type' => 'value',
+      '#value' => $existing_data[0]['id'],
+    );
+    $form['changed'] = array(
+      '#type' => 'value',
+      '#value' => time(),
+    );
+  }
+  else {
+    // New entry
+    $time = time();
+    global $user;
+    $form['created_by'] = array(
+      '#type' => 'value',
+      '#value' => $user->uid,
+    );
+    $form['created'] = array(
+      '#type' => 'value',
+      '#value' => $time,
+    );
+    $form['changed'] = array(
+      '#type' => 'value',
+      '#value' => $time,
+    );
+  }
+  
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Save'),
+  );
+
+  $form['cancel'] = array(
+    '#type' => 'link',
+    '#title' => t('Cancel'),
+    '#href' => CONFIG_PATH,
+    '#attributes' => [
+      'class' => ['button'],
+      ],
+  );
+  
+  if (user_access('user mobile auth') || user_access('admin mobile auth')) {
+    return $form;
+  }
+  else {
+    return drupal_access_denied();
+  }
+  
+}
+
+/**
+ * 
+ * Save customised app registration email to database
+ * @param type $form
+ * @param type $form_state
+ * @return form
+ */
+function indicia_api_app_email_submit($form, &$form_state) {
+  if (empty($form_state['values']['secret'])) {
+    // Don't overwrite old password if wasn't touched while editing.
+    unset($form_state['values']['secret']);
+  }
+
+  if (empty($form_state['values']['id'])) {
+    $success=drupal_write_record('indicia_api_app_email', $form_state['values']);
+    if ($success==false) {
+      $message = 'Customised app registration email save failed.';  
+    } else {
+      $message = 'Customised app registration email saved.';
+    }
+  }
+  else {
+    $success=drupal_write_record('indicia_api_app_email', $form_state['values'], 'id');
+    if ($success==false) {
+      $message = 'Customised app registration email save failed.';  
+    } else {
+      $message = 'Customised app registration email saved.';
+    }
+  }
+
+  // Inform user and return to dashboard.
+  drupal_set_message(t($message));
+  $form_state['redirect'] = CONFIG_PATH;
+}
+
+/**
  * Creates a blank form for a new key or populates it if editing.
  */
 function indicia_api_key($form, &$form_state, $keys = NULL) {
@@ -158,8 +279,82 @@ function indicia_api_key($form, &$form_state, $keys = NULL) {
  *   The html of the page.
  */
 function indicia_api_dashboard() {
-  $r = '<p>This dashboard allows you to manage API client keys. </p>';
+  $form['edit_app_email_button']=
+    array(
+      '#markup' => edit_app_email_button(),
+  );
+    
+  $form['intro'] = array(
+      '#markup' =>t('This dashboard allows you to manage API client keys.'),
+  );
 
+  $form['table'] = array(
+      '#markup' => indicia_api_dashboard_table(),
+  );
+
+  $form['activation_log'] = array (
+      '#type' => 'select',
+      '#title' => t('Activation log mode'),
+      '#options' => array(
+        0 => t('None'),
+        WATCHDOG_ERROR => t('Error'),
+        WATCHDOG_DEBUG => t('Debug'),
+      ),
+      '#default_value' => variable_get('indicia_api_activation_log', 0), 
+      '#description' => t('Select log mode for all activation events.'),
+      '#access' => user_access('admin mobile auth'),
+  );
+  
+  $form['registration_redirect'] = array (
+      '#type' => 'textfield',
+      '#title' => t('Activation success redirect'),
+      '#description' => t('Page to go to if account activation succeeds.'),
+      '#default_value' => variable_get('indicia_api_registration_redirect', '<front>'),      
+      '#access' => user_access('admin mobile auth'),
+  );
+  
+  $form['registration_redirect_unsuccessful'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Activation fail redirect'),
+      '#description' => t('Page to go to if account activation fails.'),
+      '#default_value' => variable_get('indicia_api_registration_redirect_unsuccessful', '<front>'),      
+      '#access' => user_access('admin mobile auth'),
+  );
+  
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Save'),
+  );
+
+  return $form;
+}
+
+/**
+ * Display button to take user to a page for editing registration email for app.
+ *
+ * @return string
+ *   The html of the page.
+ */
+function edit_app_email_button() { 
+  $editEmailButton = array(
+    'link1' => array(
+      'title' => t('App registration email override'),
+      'href' => CONFIG_PATH . '/indicia_api_app_email',
+      'attributes' => array('class' => array('button')),
+    ),
+  );  
+  $r = '<p>Override the registration email sent by an app. The system will automatically activate the user. '
+          . 'The user may have already entered a password on the app, in this case, you should include a link directly to the login screen within the email.</p>';
+  $r .= '<div>';
+  $r .= theme('links', array(
+    'links' => $editEmailButton,
+    'attributes' => array('class' => array('links', 'inline')),
+  ));
+  $r .= '</div><br>';
+  return $r;
+}
+
+function indicia_api_dashboard_table() {
   // Create table.
   $header = array('Enabled', 'Title', 'Description', 'Key', 'Logging', '');
   $rows = array();
@@ -201,8 +396,7 @@ function indicia_api_dashboard() {
     'rows' => $rows,
     'attributes' => array('style' => 'width:100%; text-align:left'),
   ));
-  $r .= $table;
-
+  
   // Add links beneath the table.
   $links = array(
     'link1' => array(
@@ -211,16 +405,31 @@ function indicia_api_dashboard() {
       'attributes' => array('class' => array('button')),
     ),
   );
-
  
-  $r .= theme('links', array(
+  $add_link = theme('links', array(
     'links' => $links,
     'attributes' => array('class' => array('links', 'inline')),
   ));
-
-  $r .= '</fieldset>';
+  
+  $r = '<div class="form-item">';
+  $r .= $table;
+  $r .= $add_link;
+  $r .= '</div>';
 
   return $r;
+}
+
+/**
+ * Submit handler to save redirection variables.
+ *
+ * Implements hook_submit() to submit a form produced by
+ * indicia_api_dashboard().
+ */
+function indicia_api_dashboard_submit($form, &$form_state) {
+  variable_set('indicia_api_registration_redirect', $form_state['values']['registration_redirect']);
+  variable_set('indicia_api_registration_redirect_unsuccessful', $form_state['values']['registration_redirect_unsuccessful']);
+  variable_set('indicia_api_activation_log', $form_state['values']['activation_log']);
+  drupal_set_message(t('Saved activation options.'));
 }
 
 /**
