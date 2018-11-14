@@ -4,6 +4,10 @@
  * Samples POST request handler.
  */
 function samples_create() {
+  if (module_exists('iform')) {
+    iform_load_helpers(array('data_entry_helper'));
+  }
+
   if (!validate_samples_create_request()) {
     return;
   }

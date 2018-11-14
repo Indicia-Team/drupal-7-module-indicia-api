@@ -23,6 +23,10 @@ Requires the following
  * Prints out a JSON string for the report response.
  */
 function report_get($reportID) {
+  if (module_exists('iform')) {
+    iform_load_helpers(array('data_entry_helper'));
+  }
+
   $request = drupal_static('request');
   $params = $request; // TODO: clone it
 

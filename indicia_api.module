@@ -45,14 +45,6 @@ function indicia_api_permission() {
   );
 }
 
-
-/*
- * Submit the relevant information to indicia
- */
-if (module_exists('iform')) {
-  iform_load_helpers(array('data_entry_helper'));
-}
-
 /**
  * Implements hook_menu().
  */
@@ -305,6 +297,10 @@ function indicia_api_generate_random_string($length = 10) {
  *   The indicia user id if successful else -1 or and error message.
  */
 function indicia_api_get_user_id($email, $firstname, $secondname, $cms_id = NULL) {
+  if (module_exists('iform')) {
+    iform_load_helpers(array('data_entry_helper'));
+  }
+
   // Get connection/indicia website details.
   $connection = iform_get_connection_details(NULL);
 
