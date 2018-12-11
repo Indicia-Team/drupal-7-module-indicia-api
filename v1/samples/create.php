@@ -281,7 +281,7 @@ function find_duplicates($submission) {
 	  indicia_api_log('Submission is too big: skipping the search for duplicates.');
 	  return $duplicates;
     }
-	
+
     foreach ($submission['subModels'] as $occurrence) {
       if (isset($occurrence['model']['fields']['external_key']['value'])) {
         $existing = data_entry_helper::get_population_data(array(
@@ -659,16 +659,14 @@ function prepare_media_for_upload($files = []) {
     }
     elseif (!data_entry_helper::check_upload_size($file)) {
       // Warehouse may still block it.
-      if (data_entry_helper::$validation_errors==NULL) data_entry_helper::$validation_errors = array();
+      if (data_entry_helper::$validation_errors == NULL) {
+        data_entry_helper::$validation_errors = array();
+      }
       data_entry_helper::$validation_errors[$key] = lang::get('file too big for warehouse');
     }
 
-
     $destination = $file['name'];
-    $interim_image_folder = isset(data_entry_helper::$interim_image_folder) ?
-      data_entry_helper::$interim_image_folder :
-      'upload/';
-    $uploadpath = data_entry_helper::relative_client_helper_path() . $interim_image_folder;
+    $uploadpath = data_entry_helper::getInterimImageFolder('fullpath');
 
     if (move_uploaded_file($file['tmp_name'], $uploadpath . $destination)) {
       $r[] = array(
@@ -678,7 +676,7 @@ function prepare_media_for_upload($files = []) {
         'path' => $destination,
         'caption' => '',
       );
-      $pathField = str_replace(array(':medium',':image'), array('_medium:path','_image:path'), $key);
+      $pathField = str_replace(array(':medium', ':image'), array('_medium:path', '_image:path'), $key);
       $_POST[$pathField] = $destination;
     }
 
