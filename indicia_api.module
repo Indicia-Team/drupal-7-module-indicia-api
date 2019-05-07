@@ -27,6 +27,7 @@ const FIRSTNAME_FIELD = 'field_first_name';
 const SECONDNAME_FIELD = 'field_last_name';
 const ACTIVATION_FIELD = 'field_activation_token';
 const INDICIA_ID_FIELD = 'field_indicia_user_id';
+const POLICY_AGREE_FIELD = 'field_indicia_i_agree';
 
 
 /**

@@ -94,6 +94,7 @@ function create_new_user() {
 
   $user_details[FIRSTNAME_FIELD][LANGUAGE_NONE][0]['value'] = $data['firstname'];
   $user_details[SECONDNAME_FIELD][LANGUAGE_NONE][0]['value'] = $data['secondname'];
+  $user_details[POLICY_AGREE_FIELD][LANGUAGE_NONE][0]['value'] = $data['terms-agree'];
 
   // Generate the user confirmation code returned via email.
   $activation_token = indicia_api_generate_random_string(20);
