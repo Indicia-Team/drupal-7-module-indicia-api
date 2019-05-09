@@ -68,8 +68,9 @@ function process_parameters($data, $connection) {
   $model['fields']['website_id'] = ['value' => $connection['website_id']];
   $model['fields']['survey_id'] = ['value' => $data['survey_id']];
 
-  if (in_array($model['fields']['location_id'],PRIVATE_PLOTS_LIST)) {
-    $model['fields']['privacy_precision']=10000;
+  if (in_array($data['fields']['location_id'],PRIVATE_PLOTS_LIST)) {
+    $data['fields']['privacy_precision']=10000;
+    $model['fields']['privacy_precision']['value']=10000;
   }
 
   if (isset($data['external_key'])) {
