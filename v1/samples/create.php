@@ -278,7 +278,7 @@ function find_duplicates($submission) {
   $duplicates = [];
   if (isset($submission['subModels']) && is_array($submission['subModels'])) {
     // don't run this intensive query if big model: todo - optimize and enable
-    if (sizeof($submission['subModels']) > 5) {
+    if (sizeof($submission['subModels']) > 60) {
 	  indicia_api_log('Submission is too big: skipping the search for duplicates.');
 	  return $duplicates;
     }
