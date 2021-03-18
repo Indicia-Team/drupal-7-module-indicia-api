@@ -2,10 +2,10 @@
 
 function indicia_api_advancedreports($reportName) {
   try {
-    /*if (!indicia_api_authorise_key()) {
+    if (!indicia_api_authorise_key()) {
       error_print(401, 'Unauthorized', 'Missing or incorrect API key.');
       return;
-    }*/
+    }
     switch ($reportName) {
       case 'user-stats':
         $user_wrapped = entity_metadata_wrapper('user', $GLOBALS['user']);
