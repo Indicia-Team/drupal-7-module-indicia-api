@@ -1,7 +1,38 @@
 <?php
 
+/**
+ * @file
+ * A helper class for obtaining recorder metrics data.
+ *
+ * Indicia, the OPAL Online Recording Toolkit.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * any later version.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/gpl.html.
+ *
+ * @author Indicia Team
+ * @license http://www.gnu.org/licenses/gpl.html GPL 3.0
+ * @link https://github.com/indicia-team/client_helpers
+ */
+
+/**
+ * Exception class for aborting if error response already sent.
+ */
 class ApiAbort extends Exception {}
 
+/**
+ * Class to support retrieving recorder metrics data.
+ *
+ * Retrieves key/value pairs for info required for the /user-stats advanced
+ * report.
+ */
 class RecorderMetrics {
 
   /**
@@ -18,37 +49,47 @@ class RecorderMetrics {
    */
   private $projectSpeciesCount;
 
+  /**
+   * List of recorded taxon IDs for the project, with rarity value.
+   *
+   * @var array
+   */
   private $speciesRarityData = [];
 
+  /**
+   * Median rarity value across all the project species dataset.
+   *
+   * @var float
+   */
   private $medianOverallRarity = NULL;
 
+  /**
+   * Key/value pairs for the filter applied to define this project.
+   *
+   * Used for defining cache keys.
+   *
+   * @var array
+   */
   private $projectFilter;
 
-  private $projectQuery;
-
   /**
-   * Name of the warehouse REST API endpoint for Elasticsearch access.
+   * Prebuilt Elasticsearch query code for the project filter.
    *
    * @var string
    */
-  private $esEndpoint;
-
-
+  private $projectQuery;
 
   /**
    * Constructor, stores settings.
    *
-   * @param string $esEndpoint
-   *   Name of the warehouse REST API endpoint for Elasticsearch access.
    * @param array $projectFilter
    *   Key/value pairs for the project filter to apply to the ES data, e.g. a
    *   survey ID, website ID or group ID filter.
    * @param int $userId
    *   Warehouse ID of the user to report on.
    */
-  public function __construct($esEndpoint, $projectFilter, $userId) {
+  public function __construct(array $projectFilter, $userId) {
     iform_load_helpers(['helper_base', 'ElasticsearchProxyHelper']);
-    $this->esEndpoint = $esEndpoint;
     $this->projectFilter = $projectFilter;
     $this->userId = $userId;
     $projectFilterTermFilterArray = [];
@@ -393,7 +434,16 @@ JSON;
     return $this->getEsResponse($request);
   }
 
-  function getMyTotalRecordsCount() {
+  /**
+   * Retrieve the total records for this user in the ES alias.
+   *
+   * E.g. the total across the website and it's shared datasets, not just the
+   * project.
+   *
+   * @return int
+   *   Record count.
+   */
+  private function getMyTotalRecordsCount() {
     $request = <<<JSON
       {
         "size": "0",
@@ -410,7 +460,6 @@ JSON;
 JSON;
     $response = $this->getEsResponse($request);
     return $response->hits->total;
-
   }
 
 }

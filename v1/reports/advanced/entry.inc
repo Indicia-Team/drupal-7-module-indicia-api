@@ -28,7 +28,7 @@ function indicia_api_advancedreports($reportName) {
           return;
         }
         require_once 'RecorderMetrics.php';
-        $rm = new RecorderMetrics('es-occurrences', $projectFilters, $userId);
+        $rm = new RecorderMetrics($projectFilters, $userId);
         header('Content-Type: application/json');
         echo json_encode($rm->getUserMetrics());
         break;
