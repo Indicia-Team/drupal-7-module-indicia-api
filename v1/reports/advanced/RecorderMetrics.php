@@ -4,15 +4,27 @@ class ApiAbort extends Exception {}
 
 class RecorderMetrics {
 
-  private $totalRecordsCount;
+  /**
+   * Count of records in the filtered project.
+   *
+   * @var int
+   */
+  private $projectRecordsCount;
 
-  private $totalSpeciesCount;
+  /**
+   * Count of species in the filtered project.
+   *
+   * @var int
+   */
+  private $projectSpeciesCount;
 
   private $speciesRarityData = [];
 
   private $medianOverallRarity = NULL;
 
-  private $surveyId;
+  private $projectFilter;
+
+  private $projectQuery;
 
   /**
    * Name of the warehouse REST API endpoint for Elasticsearch access.
@@ -21,31 +33,39 @@ class RecorderMetrics {
    */
   private $esEndpoint;
 
-  private $projectQuery;
+
 
   /**
    * Constructor, stores settings.
    *
    * @param string $esEndpoint
    *   Name of the warehouse REST API endpoint for Elasticsearch access.
-   * @param int $surveyId
-   *   ID of the survey to report on.
+   * @param array $projectFilter
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
    * @param int $userId
    *   Warehouse ID of the user to report on.
    */
-  public function __construct($esEndpoint, $surveyId, $userId) {
+  public function __construct($esEndpoint, $projectFilter, $userId) {
     iform_load_helpers(['helper_base', 'ElasticsearchProxyHelper']);
     $this->esEndpoint = $esEndpoint;
-    $this->surveyId = $surveyId;
+    $this->projectFilter = $projectFilter;
     $this->userId = $userId;
+    $projectFilterTermFilterArray = [];
+    foreach ($projectFilter as $field => $value) {
+      $projectFilterTermFilterArray[] = <<<JSON
+      {
+        "term": {
+          "$field": $value
+        }
+      }
+JSON;
+    }
+    $projectFilterTermFilters = implode(',', $projectFilterTermFilterArray);
     $this->projectQuery = <<<JSON
     {
       "bool": {
-        "must": [{
-          "term": {
-            "metadata.survey.id": $surveyId
-          }
-        }]
+        "must": [$projectFilterTermFilters]
       }
     }
 JSON;
@@ -63,7 +83,7 @@ JSON;
     $userRecordingData = $this->getUserRecordingData();
     $userInfo = $userRecordingData->aggregations->user_limit->by_user->buckets[0];
     // Species ratio is a simple calculation.
-    $speciesRatio = round(100 * $userInfo->species_count->value / $this->totalSpeciesCount, 1);
+    $speciesRatio = round(100 * $userInfo->species_count->value / $this->projectSpeciesCount, 1);
     // Activity ratio requires number of days in the recording season during
     // the period in which they'd contributed to the project.
     $firstInSeasonRecordDateArray = $this->getFirstInSeasonDateArray($userInfo->first_record_date->value_as_string);
@@ -95,15 +115,15 @@ JSON;
     $rarityMetric = round($medianUserRarity - $this->medianOverallRarity, 1);
     return [
       'myTotalRecords' => $this->getMyTotalRecordsCount(),
-      'surveyRecords' => $this->totalRecordsCount,
-      'surveySpecies' => $this->totalSpeciesCount,
-      'mySurveyRecords' => $userInfo->doc_count,
-      'mySurveySpecies' => $userInfo->species_count->value,
-      'mySurveyRecordsThisYear' => $userInfo->this_year_filter->doc_count,
-      'mySurveySpeciesThisYear' => $userInfo->this_year_filter->species_count->value,
-      'speciesRatio' => $speciesRatio,
-      'activityRatio' => $activityRatio,
-      'rarityMetric' => $rarityMetric,
+      'projectRecordsCount' => $this->projectRecordsCount,
+      'projectSpeciesCount' => $this->projectSpeciesCount,
+      'myProjectRecords' => $userInfo->doc_count,
+      'myProjectSpecies' => $userInfo->species_count->value,
+      'myProjectRecordsThisYear' => $userInfo->this_year_filter->doc_count,
+      'myProjectSpeciesThisYear' => $userInfo->this_year_filter->species_count->value,
+      'myProjectSpeciesRatio' => $speciesRatio,
+      'myProjectActivityRatio' => $activityRatio,
+      'myProjectRarityMetric' => $rarityMetric,
     ];
   }
 
@@ -229,10 +249,10 @@ JSON;
    */
   private function getSpeciesList() {
     // This data can be cached as rate of change will be slow.
-    $cacheKey = [
+    $cacheKey = array_merge([
       'report' => 'RecorderMetricsSpeciesList',
-      'surveyId' => $this->surveyId,
-    ];
+
+    ], $this->projectFilter);
     $taxaResponse = helper_base::cache_get($cacheKey);
     if ($taxaResponse === FALSE) {
       // Get a list of all taxa recorded in project, ordered by document count.
@@ -256,8 +276,8 @@ JSON;
     else {
       $taxaResponse = json_decode($taxaResponse);
     }
-    $this->totalRecordsCount = $taxaResponse->hits->total;
-    $this->totalSpeciesCount = count($taxaResponse->aggregations->species_list->buckets);
+    $this->projectRecordsCount = $taxaResponse->hits->total;
+    $this->projectSpeciesCount = count($taxaResponse->aggregations->species_list->buckets);
     return $taxaResponse->aggregations->species_list->buckets;
   }
 
@@ -272,12 +292,12 @@ JSON;
     // Work through the list of taxa from commonest to rarest, assigning a
     // rarity value between 1 and 100.
     foreach ($speciesList as $i => $speciesInfo) {
-      $thisSpeciesRarity = 1 + 99 * $i / ($this->totalSpeciesCount - 1);
+      $thisSpeciesRarity = 1 + 99 * $i / ($this->projectSpeciesCount - 1);
       $this->speciesRarityData[$speciesInfo->key] = $thisSpeciesRarity;
       // Keep a track of the records for the taxa processed so far. Once we get
       // to half of the total, we have found the median.
       $recordsFoundSoFar += $speciesInfo->doc_count;
-      if ($recordsFoundSoFar > $this->totalRecordsCount / 2 && !$this->medianOverallRarity) {
+      if ($recordsFoundSoFar > $this->projectRecordsCount / 2 && !$this->medianOverallRarity) {
         $this->medianOverallRarity = $thisSpeciesRarity;
       }
     }
