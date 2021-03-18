@@ -15,10 +15,10 @@ function indicia_api_advancedreports($reportName) {
           error_print(401, 'Unauthorized', 'User is not signed in to the warehouse.');
           return;
         }
-        if (empty($_GET['survey_id'])) {
+        if (!empty($_GET['survey_id'])) {
           $projectFilters = ['metadata.survey.id' => $_GET['survey_id']];
         }
-        if (empty($_GET['group_id'])) {
+        elseif (!empty($_GET['group_id'])) {
           $projectFilters = ['metadata.group.id' => $_GET['group_id']];
         }
         else {
