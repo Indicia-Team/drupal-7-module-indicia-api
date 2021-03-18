@@ -159,6 +159,9 @@ JSON;
       }
     }
     $rarityMetric = round($medianUserRarity - $this->medianOverallRarity, 1);
+    if (version_compare(phpversion(), '7.1', '>=')) {
+      ini_set('serialize_precision', -1);
+    }
     return [
       'myTotalRecords' => $this->getMyTotalRecordsCount(),
       'projectRecordsCount' => $this->projectRecordsCount,
