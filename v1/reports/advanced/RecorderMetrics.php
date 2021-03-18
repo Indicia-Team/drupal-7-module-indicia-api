@@ -130,9 +130,14 @@ JSON;
     $firstInSeasonRecordDateArray = $this->getFirstInSeasonDateArray($userInfo->first_record_date->value_as_string);
     $lastInSeasonRecordDateArray = $this->getLastInSeasonDateArray($userInfo->last_record_date->value_as_string);
     $inSeasonRecordingDaysTotal = $this->countInSeasonDaysBetween($firstInSeasonRecordDateArray, $lastInSeasonRecordDateArray);
-    // Now a simple ratio calculation.
-    $inSeasonRecordingDaysActive = $userInfo->summer_filter->summer_recording_days->value;
-    $activityRatio = round(100 * $inSeasonRecordingDaysActive / $inSeasonRecordingDaysTotal, 1);
+    // Now a simple ratio calculation, unless there were no in-season days yet.
+    if ($inSeasonRecordingDaysTotal === 0) {
+      $activityRatio = NULL;
+    }
+    else {
+      $inSeasonRecordingDaysActive = $userInfo->summer_filter->summer_recording_days->value;
+      $activityRatio = round(100 * $inSeasonRecordingDaysActive / $inSeasonRecordingDaysTotal, 1);
+    }
 
     // Now look through the user's species list to work out median rarity.
     $recordsFoundSoFar = 0;
@@ -333,7 +338,12 @@ JSON;
     // Work through the list of taxa from commonest to rarest, assigning a
     // rarity value between 1 and 100.
     foreach ($speciesList as $i => $speciesInfo) {
-      $thisSpeciesRarity = 1 + 99 * $i / ($this->projectSpeciesCount - 1);
+      if ($this->projectSpeciesCount === 1) {
+        $thisSpeciesRarity = 50;
+      }
+      else {
+        $thisSpeciesRarity = 1 + 99 * $i / ($this->projectSpeciesCount - 1);
+      }
       $this->speciesRarityData[$speciesInfo->key] = $thisSpeciesRarity;
       // Keep a track of the records for the taxa processed so far. Once we get
       // to half of the total, we have found the median.
