@@ -163,12 +163,12 @@ JSON;
       'myTotalRecords' => $this->getMyTotalRecordsCount(),
       'projectRecordsCount' => $this->projectRecordsCount,
       'projectSpeciesCount' => $this->projectSpeciesCount,
-      'myProjectRecords' => $userInfo->doc_count,
-      'myProjectSpecies' => $userInfo->species_count->value,
-      'myProjectRecordsThisYear' => $userInfo->this_year_filter->doc_count,
-      'myProjectSpeciesThisYear' => $userInfo->this_year_filter->species_count->value,
+      'myProjectRecords' => $userInfo->doc_count ?? 0,
+      'myProjectSpecies' => $userInfo->species_count->value ?? 0,
+      'myProjectRecordsThisYear' => $userInfo->this_year_filter->doc_count ?? 0,
+      'myProjectSpeciesThisYear' => $userInfo->this_year_filter->species_count->value ?? 0,
       'myProjectSpeciesRatio' => $speciesRatio,
-      'myProjectActivityRatio' => $activityRatio,
+      'myProjectActivityRatio' => $activityRatio ?? 0,
       'myProjectRarityMetric' => $rarityMetric,
     ];
   }
