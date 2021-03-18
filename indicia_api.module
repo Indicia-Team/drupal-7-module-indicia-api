@@ -74,6 +74,14 @@ function indicia_api_menu() {
     'page arguments' => array(3, 4),
     'file' => API_VERSION . '/users/user/entry.inc',
   );
+
+  $items[API_PATH . "/advanced-reports/%"] = array(
+    'title' => 'Advanced ready-made reports',
+    'page callback' => 'indicia_api_advancedreports',
+    'access callback' => TRUE,
+    'page arguments' => array(3),
+    'file' => API_VERSION . '/reports/advanced/entry.inc',
+  );
   /* TODO: support all reports resource. */
 
   $items[API_PATH . "/reports/%"] = array(
