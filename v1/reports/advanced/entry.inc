@@ -1,6 +1,9 @@
 <?php
 
 function indicia_api_advancedreports($reportName) {
+  drupal_add_http_header('Access-Control-Allow-Origin', "*");
+  drupal_add_http_header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  drupal_add_http_header('Access-Control-Allow-Headers', 'authorization, x-api-key');
   try {
     if (!indicia_api_authorise_key()) {
       error_print(401, 'Unauthorized', 'Missing or incorrect API key.');
