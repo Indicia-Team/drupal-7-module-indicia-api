@@ -4,6 +4,24 @@ function indicia_api_advancedreports($reportName) {
   drupal_add_http_header('Access-Control-Allow-Origin', "*");
   drupal_add_http_header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   drupal_add_http_header('Access-Control-Allow-Headers', 'authorization, x-api-key');
+  switch ($_SERVER['REQUEST_METHOD']) {
+    case 'GET':
+      indicia_api_advancedreports_get($reportName);
+      break;
+
+    case 'OPTIONS':
+      // No action for pre-flight OPTIONS request.
+      break;
+
+    default:
+      error_print(405, 'Method Not Allowed', 'Invalid request method');
+  }
+}
+
+/**
+ * Handles the construction of report output on a GET request.
+ */
+function indicia_api_advancedreports_get($reportName) {
   try {
     if (!indicia_api_authorise_key()) {
       error_print(401, 'Unauthorized', 'Missing or incorrect API key.');
@@ -44,5 +62,4 @@ function indicia_api_advancedreports($reportName) {
   catch (ApiAbort $e) {
     // Do nothing.
   }
-
 }
