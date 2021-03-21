@@ -25,7 +25,11 @@ function indicia_api_advancedreports_get($reportName) {
   try {
     if (!indicia_api_authorise_key()) {
       error_print(401, 'Unauthorized', 'Missing or incorrect API key.');
-      return;
+      return FALSE;
+    }
+    if (!indicia_api_authorise_user()) {
+      error_print(401, 'Unauthorized', 'Could not find/authenticate user.');
+      return FALSE;
     }
     switch ($reportName) {
       case 'user-stats':
