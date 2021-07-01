@@ -116,8 +116,7 @@ JSON;
    * Retrieves the recording metrics for the current user.
    *
    * @return array
-   *   Array keyed by user ID, where the values are objects holding the
-   *   recording metrics.
+   *   Key value array of recording metrics.
    */
   public function getUserMetrics() {
     $this->getSpeciesWithRarity();
@@ -174,6 +173,42 @@ JSON;
       'myProjectActivityRatio' => $activityRatio ?? 0,
       'myProjectRarityMetric' => $rarityMetric,
     ];
+  }
+
+  /**
+   * Count of records and species for a user, for this and all years.
+   *
+   * @return array
+   *   Key value array of recording metrics.
+   */
+  public function getUserMetricsSimple() {
+    $request = <<<JSON
+{
+  "size": "0",
+  "query": $this->projectQuery,
+  "aggs": {
+    "species_count": {
+      "cardinality": {
+        "field": "taxon.species_taxon_id"
+      }
+    }
+  }
+}
+JSON;
+    $userInfo = $this->getEsResponse($request);
+    return [
+      'myProjectRecords' => $userInfo->hits->total->value ?? 0,
+      'myProjectSpecies' => $userInfo->aggregations->species_count->value ?? 0,
+    ];
+  }
+
+  /**
+   * Retrieves the list of species recorded by the current user.
+   *
+   * @return array
+   *   Array of species data.
+   */
+  public function getUserSpeciesList() {
   }
 
   /**
