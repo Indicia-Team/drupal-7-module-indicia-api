@@ -64,13 +64,48 @@ class RecorderMetrics {
   private $medianOverallRarity = NULL;
 
   /**
-   * Key/value pairs for the filter applied to define this project.
+   * Constructor, stores settings.
    *
-   * Used for defining cache keys.
-   *
-   * @var array
+   * @param int $userId
+   *   Warehouse ID of the user to report on.
    */
-  private $projectFilter;
+  public function __construct($userId) {
+    iform_load_helpers(['helper_base', 'ElasticsearchProxyHelper']);
+    $this->userId = $userId;
+  }
+
+  /**
+   * Convert filters in array form to ES Query.
+   *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   * @param array $extraFilters
+   *   Additional filters in ES JSON syntax that can be added to a "must" query.
+   *
+   * @return string
+   *   JSON query.
+   */
+  private function getFiltersAsQuery(array $filters, array $extraFilters = []) {
+    $filterTermFilterArray = $extraFilters;
+    foreach ($filters as $field => $value) {
+      $filterTermFilterArray[] = <<<JSON
+      {
+        "term": {
+          "$field": $value
+        }
+      }
+JSON;
+    }
+    $filterTermFilters = implode(',', $filterTermFilterArray);
+    return <<<JSON
+    {
+      "bool": {
+        "must": [$filterTermFilters]
+      }
+    }
+JSON;
+  }
 
   /**
    * Prebuilt Elasticsearch query code for the project filter.
@@ -80,46 +115,17 @@ class RecorderMetrics {
   private $projectQuery;
 
   /**
-   * Constructor, stores settings.
-   *
-   * @param array $projectFilter
-   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
-   *   survey ID, website ID or group ID filter.
-   * @param int $userId
-   *   Warehouse ID of the user to report on.
-   */
-  public function __construct(array $projectFilter, $userId) {
-    iform_load_helpers(['helper_base', 'ElasticsearchProxyHelper']);
-    $this->projectFilter = $projectFilter;
-    $this->userId = $userId;
-    $projectFilterTermFilterArray = [];
-    foreach ($projectFilter as $field => $value) {
-      $projectFilterTermFilterArray[] = <<<JSON
-      {
-        "term": {
-          "$field": $value
-        }
-      }
-JSON;
-    }
-    $projectFilterTermFilters = implode(',', $projectFilterTermFilterArray);
-    $this->projectQuery = <<<JSON
-    {
-      "bool": {
-        "must": [$projectFilterTermFilters]
-      }
-    }
-JSON;
-  }
-
-  /**
    * Retrieves the recording metrics for the current user.
    *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   *
    * @return array
-   *   Array keyed by user ID, where the values are objects holding the
-   *   recording metrics.
+   *   Key value array of recording metrics.
    */
-  public function getUserMetrics() {
+  public function getUserMetrics(array $filters) {
+    $this->projectQuery = $this->getFiltersAsQuery($filters);
     $this->getSpeciesWithRarity();
     $userRecordingData = $this->getUserRecordingData();
     $userInfo = $userRecordingData->aggregations->user_limit->by_user->buckets[0];
@@ -174,6 +180,144 @@ JSON;
       'myProjectActivityRatio' => $activityRatio ?? 0,
       'myProjectRarityMetric' => $rarityMetric,
     ];
+  }
+
+  /**
+   * Count of records species and photos for a user, for this and all years.
+   *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   * @param array $categories
+   *   List of things to count. Options are:
+   *   * records
+   *   * species
+   *   * photos
+   *   * recorders.
+   *
+   * @return array
+   *   Key value array of recording metrics.
+   */
+  public function getCounts(array $filters, array $categories) {
+    $this->projectQuery = $this->getFiltersAsQuery($filters);
+    $aggs = [];
+    // Add the required aggregations. Records count is always in the result.
+    if (in_array('species', $categories)) {
+      $aggs['species_count'] = ['cardinality' => ['field' => 'taxon.species_taxon_id']];
+    }
+    if (in_array('photos', $categories)) {
+      $aggs['photo_count'] = ['nested' => ['path' => 'occurrence.media']];
+    }
+    if (in_array('recorders', $categories)) {
+      $aggs['recorder_count'] = ['cardinality' => ['field' => 'event.recorded_by.keyword']];
+    }
+    $aggsJson = count($aggs) === 0 ? '' : ', "aggs": ' . json_encode($aggs);
+    // Run the query.
+    $request = <<<JSON
+{
+  "size": "0",
+  "query": $this->projectQuery
+  $aggsJson
+}
+JSON;
+    $userInfo = $this->getEsResponse($request);
+    // Build response with requested elements.
+    $r = [];
+    if (in_array('records', $categories)) {
+      $r['records'] = $userInfo->hits->total->value ?? 0;
+    }
+    if (in_array('species', $categories)) {
+      $r['species'] = $userInfo->aggregations->species_count->value ?? 0;
+    }
+    if (in_array('photos', $categories)) {
+      $r['photos'] = $userInfo->aggregations->photo_count->doc_count;
+    }
+    if (in_array('recorders', $categories)) {
+      $r['recorders'] = $userInfo->aggregations->recorder_count->value;
+    }
+    return $r;
+  }
+
+  /**
+   * Retrieves the list of recorded species or other taxa.
+   *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   * @param bool $excludeHigherTaxa
+   *   If set to TRUE then taxa higher than species are excluded.
+   *
+   * @return array
+   *   Array of species/taxon data.
+   */
+  public function getRecordedTaxaList(array $filters, $excludeHigherTaxa = FALSE) {
+    $extraFilters = [];
+    if ($excludeHigherTaxa) {
+      $extraFilters[] = <<<JSON
+{
+  "exists": {
+    "field": "taxon.species_taxon_id"
+  }
+}
+JSON;
+    }
+    $this->projectQuery = $this->getFiltersAsQuery($filters, $extraFilters);
+    $request = <<<JSON
+{
+  "size": "0",
+  "query": $this->projectQuery,
+  "aggs": {
+    "taxa": {
+      "terms" : {
+        "size": 10000,
+        "field": "taxon.accepted_taxon_id",
+        "order": {"_count": "desc"}
+      },
+      "aggs": {
+        "fieldlist": {
+          "top_hits": {
+            "size": 1,
+            "_source": {
+              "includes": [
+                "taxon.accepted_taxon_id",
+                "taxon.kingdom",
+                "taxon.order",
+                "taxon.family",
+                "taxon.group",
+                "taxon.accepted_name",
+                "taxon.vernacular_name",
+                "taxon.taxon_meaning_id"
+              ]
+            }
+          }
+        },
+        "first_date": {
+          "min": {
+            "field": "event.date_start",
+            "format": "dd/MM/yyyy"
+          }
+        },
+        "last_date": {
+          "max": {
+            "field": "event.date_end",
+            "format": "dd/MM/yyyy"
+          }
+        }
+      }
+    }
+  }
+}
+JSON;
+    $response = $this->getEsResponse($request);
+    $r = [];
+    foreach ($response->aggregations->taxa->buckets as $taxon) {
+      $fieldValues = (array) $taxon->fieldlist->hits->hits[0]->_source->taxon;
+      $fieldValues['record_count'] = $taxon->doc_count;
+      $fieldValues['first_date'] = $taxon->first_date->value_as_string;
+      $fieldValues['last_date'] = $taxon->last_date->value_as_string;
+      $r[] = $fieldValues;
+    }
+    return $r;
   }
 
   /**
@@ -325,7 +469,8 @@ JSON;
     else {
       $taxaResponse = json_decode($taxaResponse);
     }
-    $this->projectRecordsCount = $taxaResponse->hits->total;
+    // ES 6/7 tolerance.
+    $this->projectRecordsCount = isset($taxaResponse->hits->total->value) ? $taxaResponse->hits->total->value : $taxaResponse->hits->total;
     $this->projectSpeciesCount = count($taxaResponse->aggregations->species_list->buckets);
     return $taxaResponse->aggregations->species_list->buckets;
   }
@@ -472,7 +617,8 @@ JSON;
       }
 JSON;
     $response = $this->getEsResponse($request);
-    return $response->hits->total;
+    // ES 6/7 tolerance.
+    return isset($response->hits->total->value) ? $response->hits->total->value : $response->hits->total;
   }
 
 }
