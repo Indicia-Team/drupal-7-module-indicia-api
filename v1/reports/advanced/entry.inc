@@ -93,8 +93,9 @@ function indicia_api_advancedreports_get($reportName) {
         echo json_encode($rm->getCounts($filters, $categories));
         break;
 
-      case 'species-list':
-        echo json_encode($rm->getUserSpeciesList($filters));
+      case 'recorded-taxa-list':
+        $excludeHigherTaxa = isset($_GET['exclude_higher_taxa']) && $_GET['exclude_higher_taxa'] === 't' ? TRUE : FALSE;
+        echo json_encode($rm->getRecordedTaxaList($filters, $excludeHigherTaxa));
         break;
 
       default:

@@ -80,12 +80,14 @@ class RecorderMetrics {
    * @param array $filters
    *   Key/value pairs for the project filter to apply to the ES data, e.g. a
    *   survey ID, website ID or group ID filter.
+   * @param array $extraFilters
+   *   Additional filters in ES JSON syntax that can be added to a "must" query.
    *
    * @return string
    *   JSON query.
    */
-  private function getFiltersAsQuery(array $filters) {
-    $filterTermFilterArray = [];
+  private function getFiltersAsQuery(array $filters, array $extraFilters = []) {
+    $filterTermFilterArray = $extraFilters;
     foreach ($filters as $field => $value) {
       $filterTermFilterArray[] = <<<JSON
       {
@@ -237,12 +239,85 @@ JSON;
   }
 
   /**
-   * Retrieves the list of species recorded by the current user.
+   * Retrieves the list of recorded species or other taxa.
+   *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   * @param bool $excludeHigherTaxa
+   *   If set to TRUE then taxa higher than species are excluded.
    *
    * @return array
-   *   Array of species data.
+   *   Array of species/taxon data.
    */
-  public function getUserSpeciesList() {
+  public function getRecordedTaxaList(array $filters, $excludeHigherTaxa = FALSE) {
+    $extraFilters = [];
+    if ($excludeHigherTaxa) {
+      $extraFilters[] = <<<JSON
+{
+  "exists": {
+    "field": "taxon.species_taxon_id"
+  }
+}
+JSON;
+    }
+    $this->projectQuery = $this->getFiltersAsQuery($filters, $extraFilters);
+    $request = <<<JSON
+{
+  "size": "0",
+  "query": $this->projectQuery,
+  "aggs": {
+    "taxa": {
+      "terms" : {
+        "size": 10000,
+        "field": "taxon.accepted_taxon_id",
+        "order": {"_count": "desc"}
+      },
+      "aggs": {
+        "fieldlist": {
+          "top_hits": {
+            "size": 1,
+            "_source": {
+              "includes": [
+                "taxon.accepted_taxon_id",
+                "taxon.kingdom",
+                "taxon.order",
+                "taxon.family",
+                "taxon.group",
+                "taxon.accepted_name",
+                "taxon.vernacular_name",
+                "taxon.taxon_meaning_id"
+              ]
+            }
+          }
+        },
+        "first_date": {
+          "min": {
+            "field": "event.date_start",
+            "format": "dd/MM/yyyy"
+          }
+        },
+        "last_date": {
+          "max": {
+            "field": "event.date_end",
+            "format": "dd/MM/yyyy"
+          }
+        }
+      }
+    }
+  }
+}
+JSON;
+    $response = $this->getEsResponse($request);
+    $r = [];
+    foreach ($response->aggregations->taxa->buckets as $taxon) {
+      $fieldValues = (array) $taxon->fieldlist->hits->hits[0]->_source->taxon;
+      $fieldValues['record_count'] = $taxon->doc_count;
+      $fieldValues['first_date'] = $taxon->first_date->value_as_string;
+      $fieldValues['last_date'] = $taxon->last_date->value_as_string;
+      $r[] = $fieldValues;
+    }
+    return $r;
   }
 
   /**
@@ -394,7 +469,8 @@ JSON;
     else {
       $taxaResponse = json_decode($taxaResponse);
     }
-    $this->projectRecordsCount = $taxaResponse->hits->total;
+    // ES 6/7 tolerance.
+    $this->projectRecordsCount = isset($taxaResponse->hits->total->value) ? $taxaResponse->hits->total->value : $taxaResponse->hits->total;
     $this->projectSpeciesCount = count($taxaResponse->aggregations->species_list->buckets);
     return $taxaResponse->aggregations->species_list->buckets;
   }
@@ -541,7 +617,8 @@ JSON;
       }
 JSON;
     $response = $this->getEsResponse($request);
-    return $response->hits->total;
+    // ES 6/7 tolerance.
+    return isset($response->hits->total->value) ? $response->hits->total->value : $response->hits->total;
   }
 
 }
