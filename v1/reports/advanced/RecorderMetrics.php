@@ -64,13 +64,46 @@ class RecorderMetrics {
   private $medianOverallRarity = NULL;
 
   /**
-   * Key/value pairs for the filter applied to define this project.
+   * Constructor, stores settings.
    *
-   * Used for defining cache keys.
-   *
-   * @var array
+   * @param int $userId
+   *   Warehouse ID of the user to report on.
    */
-  private $projectFilter;
+  public function __construct($userId) {
+    iform_load_helpers(['helper_base', 'ElasticsearchProxyHelper']);
+    $this->userId = $userId;
+  }
+
+  /**
+   * Convert filters in array form to ES Query.
+   *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   *
+   * @return string
+   *   JSON query.
+   */
+  private function getFiltersAsQuery(array $filters) {
+    $filterTermFilterArray = [];
+    foreach ($filters as $field => $value) {
+      $filterTermFilterArray[] = <<<JSON
+      {
+        "term": {
+          "$field": $value
+        }
+      }
+JSON;
+    }
+    $filterTermFilters = implode(',', $filterTermFilterArray);
+    return <<<JSON
+    {
+      "bool": {
+        "must": [$filterTermFilters]
+      }
+    }
+JSON;
+  }
 
   /**
    * Prebuilt Elasticsearch query code for the project filter.
@@ -80,45 +113,17 @@ class RecorderMetrics {
   private $projectQuery;
 
   /**
-   * Constructor, stores settings.
+   * Retrieves the recording metrics for the current user.
    *
-   * @param array $projectFilter
+   * @param array $filters
    *   Key/value pairs for the project filter to apply to the ES data, e.g. a
    *   survey ID, website ID or group ID filter.
-   * @param int $userId
-   *   Warehouse ID of the user to report on.
-   */
-  public function __construct(array $projectFilter, $userId) {
-    iform_load_helpers(['helper_base', 'ElasticsearchProxyHelper']);
-    $this->projectFilter = $projectFilter;
-    $this->userId = $userId;
-    $projectFilterTermFilterArray = [];
-    foreach ($projectFilter as $field => $value) {
-      $projectFilterTermFilterArray[] = <<<JSON
-      {
-        "term": {
-          "$field": $value
-        }
-      }
-JSON;
-    }
-    $projectFilterTermFilters = implode(',', $projectFilterTermFilterArray);
-    $this->projectQuery = <<<JSON
-    {
-      "bool": {
-        "must": [$projectFilterTermFilters]
-      }
-    }
-JSON;
-  }
-
-  /**
-   * Retrieves the recording metrics for the current user.
    *
    * @return array
    *   Key value array of recording metrics.
    */
-  public function getUserMetrics() {
+  public function getUserMetrics(array $filters) {
+    $this->projectQuery = $this->getFiltersAsQuery($filters);
     $this->getSpeciesWithRarity();
     $userRecordingData = $this->getUserRecordingData();
     $userInfo = $userRecordingData->aggregations->user_limit->by_user->buckets[0];
@@ -176,30 +181,59 @@ JSON;
   }
 
   /**
-   * Count of records and species for a user, for this and all years.
+   * Count of records species and photos for a user, for this and all years.
+   *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   * @param array $categories
+   *   List of things to count. Options are:
+   *   * records
+   *   * species
+   *   * photos
+   *   * recorders.
    *
    * @return array
    *   Key value array of recording metrics.
    */
-  public function getUserMetricsSimple() {
+  public function getCounts(array $filters, array $categories) {
+    $this->projectQuery = $this->getFiltersAsQuery($filters);
+    $aggs = [];
+    // Add the required aggregations. Records count is always in the result.
+    if (in_array('species', $categories)) {
+      $aggs['species_count'] = ['cardinality' => ['field' => 'taxon.species_taxon_id']];
+    }
+    if (in_array('photos', $categories)) {
+      $aggs['photo_count'] = ['nested' => ['path' => 'occurrence.media']];
+    }
+    if (in_array('recorders', $categories)) {
+      $aggs['recorder_count'] = ['cardinality' => ['field' => 'event.recorded_by.keyword']];
+    }
+    $aggsJson = count($aggs) === 0 ? '' : ', "aggs": ' . json_encode($aggs);
+    // Run the query.
     $request = <<<JSON
 {
   "size": "0",
-  "query": $this->projectQuery,
-  "aggs": {
-    "species_count": {
-      "cardinality": {
-        "field": "taxon.species_taxon_id"
-      }
-    }
-  }
+  "query": $this->projectQuery
+  $aggsJson
 }
 JSON;
     $userInfo = $this->getEsResponse($request);
-    return [
-      'myProjectRecords' => $userInfo->hits->total->value ?? 0,
-      'myProjectSpecies' => $userInfo->aggregations->species_count->value ?? 0,
-    ];
+    // Build response with requested elements.
+    $r = [];
+    if (in_array('records', $categories)) {
+      $r['records'] = $userInfo->hits->total->value ?? 0;
+    }
+    if (in_array('species', $categories)) {
+      $r['species'] = $userInfo->aggregations->species_count->value ?? 0;
+    }
+    if (in_array('photos', $categories)) {
+      $r['photos'] = $userInfo->aggregations->photo_count->doc_count;
+    }
+    if (in_array('recorders', $categories)) {
+      $r['recorders'] = $userInfo->aggregations->recorder_count->value;
+    }
+    return $r;
   }
 
   /**

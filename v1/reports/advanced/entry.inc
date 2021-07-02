@@ -23,6 +23,7 @@ function indicia_api_advancedreports($reportName) {
  */
 function indicia_api_advancedreports_get($reportName) {
   try {
+    header('Content-Type: application/json');
     if (!indicia_api_authorise_key()) {
       error_print(401, 'Unauthorized', 'Missing or incorrect API key.');
       return FALSE;
@@ -31,31 +32,69 @@ function indicia_api_advancedreports_get($reportName) {
       error_print(401, 'Unauthorized', 'Could not find/authenticate user.');
       return FALSE;
     }
+
+    $user_wrapped = entity_metadata_wrapper('user', $GLOBALS['user']);
+    $userId = $user_wrapped->field_indicia_user_id->value();
+    $filters = [];
+    if (!$userId) {
+      error_print(401, 'Unauthorized', 'User is not signed in to the warehouse.');
+      return;
+    }
+    if (!empty($_GET['survey_id'])) {
+      $filters = ['metadata.survey.id' => $_GET['survey_id']];
+    }
+    elseif (!empty($_GET['group_id'])) {
+      $filters = ['metadata.group.id' => $_GET['group_id']];
+    }
+    else {
+      // @todo Add support for website_id filter, but need to check error
+      // handling if species list huge.
+      error_print(400, 'Bad Request', 'Parameter for survey_id or group_id missing from query string.');
+      return;
+    }
+    // Optional taxon group filter.
+    if (!empty($_GET['taxon_group_id'])) {
+      $filters = ['taxon.group_id' => $_GET['taxon_group_id']];
+    }
+    // Some end-points can return data for any chosen year.
+    if (!empty($_GET['year']) && $reportName !== 'user-stats') {
+      $filters['event.year'] = $_GET['year'];
+    }
+    // Some have optional user filter.
+    if (!empty($_GET['user_id']) && $reportName !== 'user-stats') {
+      // Can only request your own data.
+      if ($_GET['user_id'] !== $userId) {
+        error_print(401, 'Unauthorized', "Cannot request other user's data.");
+        return;
+      }
+      $filters['metadata.created_by_id'] = $userId;
+    }
+    require_once 'RecorderMetrics.php';
+    $rm = new RecorderMetrics($userId);
     switch ($reportName) {
       case 'user-stats':
-        $user_wrapped = entity_metadata_wrapper('user', $GLOBALS['user']);
-        $userId = $user_wrapped->field_indicia_user_id->value();
-        $projectFilters = [];
-        if (!$userId) {
-          error_print(401, 'Unauthorized', 'User is not signed in to the warehouse.');
-          return;
-        }
-        if (!empty($_GET['survey_id'])) {
-          $projectFilters = ['metadata.survey.id' => $_GET['survey_id']];
-        }
-        elseif (!empty($_GET['group_id'])) {
-          $projectFilters = ['metadata.group.id' => $_GET['group_id']];
+        echo json_encode($rm->getUserMetrics($filters));
+        break;
+
+      case 'counts':
+        // Count categories defaults to just records.
+        if (!isset($_GET['categories'])) {
+          $categories = ['records'];
         }
         else {
-          // @todo Add support for website_id filter, but need to check error
-          // handling if species list huge.
-          error_print(400, 'Bad Request', 'Parameter for survey_id or group_id missing from query string.');
-          return;
+          $categories = explode(',', $_GET['categories']);
+          foreach ($categories as $category) {
+            if (!in_array($category, ['records', 'species', 'photos', 'recorders'])) {
+              error_print(400, 'Bad Request', "Parameter for categories contains invalid value $category.");
+              return;
+            }
+          }
         }
-        require_once 'RecorderMetrics.php';
-        $rm = new RecorderMetrics($projectFilters, $userId);
-        header('Content-Type: application/json');
-        echo json_encode($rm->getUserMetrics());
+        echo json_encode($rm->getCounts($filters, $categories));
+        break;
+
+      case 'species-list':
+        echo json_encode($rm->getUserSpeciesList($filters));
         break;
 
       default:
