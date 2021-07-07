@@ -36,6 +36,22 @@ class ApiAbort extends Exception {}
 class RecorderMetrics {
 
   /**
+   * Prebuilt Elasticsearch query code for the project filter.
+   *
+   * @var string
+   */
+  private $esQuery;
+
+  /**
+   * Cache key options for the ES Query.
+   *
+   * Allows a unique cache key for this requests' specific filter.
+   *
+   * @var array
+   */
+  private $esQueryCacheOpts;
+
+  /**
    * Count of records in the filtered project.
    *
    * @var int
@@ -64,49 +80,51 @@ class RecorderMetrics {
   private $medianOverallRarity = NULL;
 
   /**
-   * Key/value pairs for the filter applied to define this project.
-   *
-   * Used for defining cache keys.
-   *
-   * @var array
-   */
-  private $projectFilter;
-
-  /**
-   * Prebuilt Elasticsearch query code for the project filter.
-   *
-   * @var string
-   */
-  private $projectQuery;
-
-  /**
    * Constructor, stores settings.
    *
-   * @param array $projectFilter
-   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
-   *   survey ID, website ID or group ID filter.
    * @param int $userId
    *   Warehouse ID of the user to report on.
    */
-  public function __construct(array $projectFilter, $userId) {
+  public function __construct($userId) {
     iform_load_helpers(['helper_base', 'ElasticsearchProxyHelper']);
-    $this->projectFilter = $projectFilter;
     $this->userId = $userId;
-    $projectFilterTermFilterArray = [];
-    foreach ($projectFilter as $field => $value) {
-      $projectFilterTermFilterArray[] = <<<JSON
-      {
-        "term": {
-          "$field": $value
+  }
+
+  /**
+   * Convert filters in array form to ES Query.
+   *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   * @param array $extraFilters
+   *   Additional filters in ES JSON syntax that can be added to a "must"
+   *   query.
+   * @param array $extraFiltersCacheKeys
+   *   Key value pairs that uniquely identify any extra filters so a unique
+   *   cache key can be built.
+   */
+  private function applyFilters(array $filters, array $extraFilters = [], array $extraFiltersCacheKeys = []) {
+    // Save any extra filters.
+    $filterTermFilterArray = $extraFilters;
+    // Reset the cache key and apply extraFiltersCacheKeys.
+    $this->esQueryCacheOpts = $extraFiltersCacheKeys;
+    // Apply simple term filters.
+    foreach ($filters as $field => $value) {
+      $filterTermFilterArray[] = <<<JSON
+        {
+          "term": {
+            "$field": $value
+          }
         }
-      }
 JSON;
+      // Add simple term filter to the cache key.
+      $this->esQueryCacheOpts[$field] = $value;
     }
-    $projectFilterTermFilters = implode(',', $projectFilterTermFilterArray);
-    $this->projectQuery = <<<JSON
+    $filterTermFilters = implode(',', $filterTermFilterArray);
+    $this->esQuery = <<<JSON
     {
       "bool": {
-        "must": [$projectFilterTermFilters]
+        "must": [$filterTermFilters]
       }
     }
 JSON;
@@ -115,52 +133,58 @@ JSON;
   /**
    * Retrieves the recording metrics for the current user.
    *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   *
    * @return array
-   *   Array keyed by user ID, where the values are objects holding the
-   *   recording metrics.
+   *   Key value array of recording metrics.
    */
-  public function getUserMetrics() {
+  public function getUserMetrics(array $filters) {
+    $this->applyFilters($filters);
     $this->getSpeciesWithRarity();
     $userRecordingData = $this->getUserRecordingData();
-    $userInfo = $userRecordingData->aggregations->user_limit->by_user->buckets[0];
-    // Species ratio is a simple calculation.
-    $speciesRatio = round(100 * $userInfo->species_count->value / $this->projectSpeciesCount, 1);
-    // Activity ratio requires number of days in the recording season during
-    // the period in which they'd contributed to the project.
-    $firstInSeasonRecordDateArray = $this->getFirstInSeasonDateArray($userInfo->first_record_date->value_as_string);
-    $lastInSeasonRecordDateArray = $this->getLastInSeasonDateArray($userInfo->last_record_date->value_as_string);
-    $inSeasonRecordingDaysTotal = $this->countInSeasonDaysBetween($firstInSeasonRecordDateArray, $lastInSeasonRecordDateArray);
-    // Now a simple ratio calculation, unless there were no in-season days yet.
-    if ($inSeasonRecordingDaysTotal === 0) {
-      $activityRatio = NULL;
-    }
-    else {
-      $inSeasonRecordingDaysActive = $userInfo->summer_filter->summer_recording_days->value;
-      $activityRatio = round(100 * $inSeasonRecordingDaysActive / $inSeasonRecordingDaysTotal, 1);
-    }
+    if (count($userRecordingData->aggregations->user_limit->by_user->buckets) > 0) {
+      $userInfo = $userRecordingData->aggregations->user_limit->by_user->buckets[0];
+      // Species ratio is a simple calculation.
+      $speciesRatio = round(100 * $userInfo->species_count->value / $this->projectSpeciesCount, 1);
+      // Activity ratio requires number of days in the recording season during
+      // the period in which they'd contributed to the project.
+      $firstInSeasonRecordDateArray = $this->getFirstInSeasonDateArray($userInfo->first_record_date->value_as_string);
+      $lastInSeasonRecordDateArray = $this->getLastInSeasonDateArray($userInfo->last_record_date->value_as_string);
+      $inSeasonRecordingDaysTotal = $this->countInSeasonDaysBetween($firstInSeasonRecordDateArray, $lastInSeasonRecordDateArray);
+      // Now a simple ratio calculation, unless there were no in-season days yet.
+      if ($inSeasonRecordingDaysTotal === 0) {
+        $activityRatio = NULL;
+      }
+      else {
+        $inSeasonRecordingDaysActive = $userInfo->summer_filter->summer_recording_days->value;
+        $activityRatio = round(100 * $inSeasonRecordingDaysActive / $inSeasonRecordingDaysTotal, 1);
+      }
 
-    // Now look through the user's species list to work out median rarity.
-    $recordsFoundSoFar = 0;
-    $medianUserRarity = NULL;
-    $userSpeciesCountData = [];
-    // Get a simple list of the user's taxa counts.
-    foreach ($userInfo->species_list->buckets as $i => $speciesInfo) {
-      $userSpeciesCountData[$speciesInfo->key] = $speciesInfo->doc_count;
-    }
-    // Work through the list of the user's taxa but in overall rarity order,
-    // so we can find the median.
-    foreach ($this->speciesRarityData as $taxonID => $speciesRarityValue) {
-      if (isset($userSpeciesCountData[$taxonID])) {
-        $recordsFoundSoFar += $userSpeciesCountData[$taxonID];
+      // Now look through the user's species list to work out median rarity.
+      $recordsFoundSoFar = 0;
+      $medianUserRarity = NULL;
+      $userSpeciesCountData = [];
+      // Get a simple list of the user's taxa counts.
+      foreach ($userInfo->species_list->buckets as $i => $speciesInfo) {
+        $userSpeciesCountData[$speciesInfo->key] = $speciesInfo->doc_count;
       }
-      if ($recordsFoundSoFar > $userInfo->doc_count / 2) {
-        $medianUserRarity = $speciesRarityValue;
-        break;
+      // Work through the list of the user's taxa but in overall rarity order,
+      // so we can find the median.
+      foreach ($this->speciesRarityData as $taxonID => $speciesRarityValue) {
+        if (isset($userSpeciesCountData[$taxonID])) {
+          $recordsFoundSoFar += $userSpeciesCountData[$taxonID];
+        }
+        if ($recordsFoundSoFar > $userInfo->doc_count / 2) {
+          $medianUserRarity = $speciesRarityValue;
+          break;
+        }
       }
-    }
-    $rarityMetric = round($medianUserRarity - $this->medianOverallRarity, 1);
-    if (version_compare(phpversion(), '7.1', '>=')) {
-      ini_set('serialize_precision', -1);
+      $rarityMetric = round($medianUserRarity - $this->medianOverallRarity, 1);
+      if (version_compare(phpversion(), '7.1', '>=')) {
+        ini_set('serialize_precision', -1);
+      }
     }
     return [
       'myTotalRecords' => $this->getMyTotalRecordsCount(),
@@ -170,10 +194,157 @@ JSON;
       'myProjectSpecies' => $userInfo->species_count->value ?? 0,
       'myProjectRecordsThisYear' => $userInfo->this_year_filter->doc_count ?? 0,
       'myProjectSpeciesThisYear' => $userInfo->this_year_filter->species_count->value ?? 0,
-      'myProjectSpeciesRatio' => $speciesRatio,
+      'myProjectSpeciesRatio' => $speciesRatio ?? 0,
       'myProjectActivityRatio' => $activityRatio ?? 0,
-      'myProjectRarityMetric' => $rarityMetric,
+      'myProjectRarityMetric' => $rarityMetric ?? 0,
     ];
+  }
+
+  /**
+   * Count of records species and photos for a user, for this and all years.
+   *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   * @param array $categories
+   *   List of things to count. Options are:
+   *   * records
+   *   * species
+   *   * photos
+   *   * recorders.
+   *
+   * @return array
+   *   Key value array of recording metrics.
+   */
+  public function getCounts(array $filters, array $categories) {
+    $this->applyFilters($filters);
+    $aggs = [];
+    // Add the required aggregations. Records count is always in the result.
+    if (in_array('species', $categories)) {
+      $aggs['species_count'] = ['cardinality' => ['field' => 'taxon.species_taxon_id']];
+    }
+    if (in_array('photos', $categories)) {
+      $aggs['photo_count'] = ['nested' => ['path' => 'occurrence.media']];
+    }
+    if (in_array('recorders', $categories)) {
+      $aggs['recorder_count'] = ['cardinality' => ['field' => 'event.recorded_by.keyword']];
+    }
+    $aggsJson = count($aggs) === 0 ? '' : ', "aggs": ' . json_encode($aggs);
+    // Run the query.
+    $request = <<<JSON
+{
+  "size": "0",
+  "query": $this->esQuery
+  $aggsJson
+}
+JSON;
+    $userInfo = $this->getEsResponse($request);
+    // Build response with requested elements.
+    $r = [];
+    if (in_array('records', $categories)) {
+      $r['records'] = $userInfo->hits->total->value ?? 0;
+    }
+    if (in_array('species', $categories)) {
+      $r['species'] = $userInfo->aggregations->species_count->value ?? 0;
+    }
+    if (in_array('photos', $categories)) {
+      $r['photos'] = $userInfo->aggregations->photo_count->doc_count;
+    }
+    if (in_array('recorders', $categories)) {
+      $r['recorders'] = $userInfo->aggregations->recorder_count->value;
+    }
+    return $r;
+  }
+
+  /**
+   * Retrieves the list of recorded species or other taxa.
+   *
+   * @param array $filters
+   *   Key/value pairs for the project filter to apply to the ES data, e.g. a
+   *   survey ID, website ID or group ID filter.
+   * @param bool $excludeHigherTaxa
+   *   If set to TRUE then taxa higher than species are excluded.
+   *
+   * @return array
+   *   Array of species/taxon data.
+   */
+  public function getRecordedTaxaList(array $filters, $excludeHigherTaxa = FALSE) {
+    $extraFilters = [];
+    $extraFiltersCacheKeys = [];
+    if ($excludeHigherTaxa) {
+      $extraFilters[] = <<<JSON
+{
+  "exists": {
+    "field": "taxon.species_taxon_id"
+  }
+}
+JSON;
+      $extraFiltersCacheKeys = ['fieldexists' => 'taxon.species_taxon_id'];
+    }
+    $this->applyFilters($filters, $extraFilters, $extraFiltersCacheKeys);
+    $request = <<<JSON
+{
+  "size": "0",
+  "query": $this->esQuery,
+  "aggs": {
+    "taxa": {
+      "terms" : {
+        "size": 10000,
+        "field": "taxon.accepted_taxon_id",
+        "order": {"_count": "desc"}
+      },
+      "aggs": {
+        "fieldlist": {
+          "top_hits": {
+            "size": 1,
+            "_source": {
+              "includes": [
+                "taxon.accepted_taxon_id",
+                "taxon.kingdom",
+                "taxon.order",
+                "taxon.family",
+                "taxon.group",
+                "taxon.accepted_name",
+                "taxon.vernacular_name",
+                "taxon.taxon_rank",
+                "taxon.taxon_meaning_id"
+              ]
+            }
+          }
+        },
+        "first_date": {
+          "min": {
+            "field": "event.date_start",
+            "format": "dd/MM/yyyy"
+          }
+        },
+        "last_date": {
+          "max": {
+            "field": "event.date_end",
+            "format": "dd/MM/yyyy"
+          }
+        },
+        "total_individual_count": {
+          "sum": {
+            "field": "occurrence.individual_count"
+          }
+        }
+      }
+    }
+  }
+}
+JSON;
+    $response = $this->getEsResponse($request);
+    $r = [];
+    foreach ($response->aggregations->taxa->buckets as $taxon) {
+      $fieldValues = (array) $taxon->fieldlist->hits->hits[0]->_source->taxon;
+      $fieldValues['record_count'] = $taxon->doc_count;
+      $fieldValues['total_individual_count'] = $taxon->total_individual_count->value;
+      $fieldValues['first_date'] = $taxon->first_date->value_as_string;
+      $fieldValues['last_date'] = $taxon->last_date->value_as_string;
+      $r[] = $fieldValues;
+    }
+    return $r;
   }
 
   /**
@@ -300,15 +471,14 @@ JSON;
     // This data can be cached as rate of change will be slow.
     $cacheKey = array_merge([
       'report' => 'RecorderMetricsSpeciesList',
-
-    ], $this->projectFilter);
+    ], $this->esQueryCacheOpts);
     $taxaResponse = helper_base::cache_get($cacheKey);
     if ($taxaResponse === FALSE) {
       // Get a list of all taxa recorded in project, ordered by document count.
       $request = <<<JSON
         {
           "size": "0",
-          "query": $this->projectQuery,
+          "query": $this->esQuery,
           "aggs": {
             "species_list": {
               "terms": {
@@ -325,7 +495,8 @@ JSON;
     else {
       $taxaResponse = json_decode($taxaResponse);
     }
-    $this->projectRecordsCount = $taxaResponse->hits->total;
+    // ES 6/7 tolerance.
+    $this->projectRecordsCount = isset($taxaResponse->hits->total->value) ? $taxaResponse->hits->total->value : $taxaResponse->hits->total;
     $this->projectSpeciesCount = count($taxaResponse->aggregations->species_list->buckets);
     return $taxaResponse->aggregations->species_list->buckets;
   }
@@ -366,7 +537,7 @@ JSON;
     $request = <<<JSON
       {
         "size": "0",
-        "query": $this->projectQuery,
+        "query": $this->esQuery,
         "aggs": {
           "total_species": {
             "cardinality": {
@@ -472,7 +643,8 @@ JSON;
       }
 JSON;
     $response = $this->getEsResponse($request);
-    return $response->hits->total;
+    // ES 6/7 tolerance.
+    return isset($response->hits->total->value) ? $response->hits->total->value : $response->hits->total;
   }
 
 }
