@@ -306,6 +306,7 @@ JSON;
                 "taxon.group",
                 "taxon.accepted_name",
                 "taxon.vernacular_name",
+                "taxon.taxon_rank",
                 "taxon.taxon_meaning_id"
               ]
             }
@@ -322,6 +323,11 @@ JSON;
             "field": "event.date_end",
             "format": "dd/MM/yyyy"
           }
+        },
+        "total_individual_count": {
+          "sum": {
+            "field": "occurrence.individual_count"
+          }
         }
       }
     }
@@ -333,6 +339,7 @@ JSON;
     foreach ($response->aggregations->taxa->buckets as $taxon) {
       $fieldValues = (array) $taxon->fieldlist->hits->hits[0]->_source->taxon;
       $fieldValues['record_count'] = $taxon->doc_count;
+      $fieldValues['total_individual_count'] = $taxon->total_individual_count->value;
       $fieldValues['first_date'] = $taxon->first_date->value_as_string;
       $fieldValues['last_date'] = $taxon->last_date->value_as_string;
       $r[] = $fieldValues;
