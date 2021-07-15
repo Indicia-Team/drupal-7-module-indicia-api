@@ -106,6 +106,14 @@ class RecorderMetrics {
   private function applyFilters(array $filters, array $extraFilters = [], array $extraFiltersCacheKeys = []) {
     // Save any extra filters.
     $filterTermFilterArray = $extraFilters;
+    // Always exclude trial data.
+    $filterTermFilterArray[] = <<<JSON
+      {
+        "term": {
+          "metadata.trial": false
+        }
+      }
+JSON;
     // Reset the cache key and apply extraFiltersCacheKeys.
     $this->esQueryCacheOpts = $extraFiltersCacheKeys;
     // Apply simple term filters.
