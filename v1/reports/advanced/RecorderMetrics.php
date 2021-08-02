@@ -270,16 +270,17 @@ JSON;
    * @param array $filters
    *   Key/value pairs for the project filter to apply to the ES data, e.g. a
    *   survey ID, website ID or group ID filter.
-   * @param bool $excludeHigherTaxa
-   *   If set to TRUE then taxa higher than species are excluded.
+   * @param bool $speciesOnly
+   *   If set to TRUE then taxa higher than species are excluded and ranks
+   *   lower than species are reported at the species level.
    *
    * @return array
    *   Array of species/taxon data.
    */
-  public function getRecordedTaxaList(array $filters, $excludeHigherTaxa = FALSE) {
+  public function getRecordedTaxaList(array $filters, $speciesOnly = FALSE) {
     $extraFilters = [];
     $extraFiltersCacheKeys = [];
-    if ($excludeHigherTaxa) {
+    if ($speciesOnly) {
       $extraFilters[] = <<<JSON
 {
   "exists": {
@@ -289,6 +290,10 @@ JSON;
 JSON;
       $extraFiltersCacheKeys = ['fieldexists' => 'taxon.species_taxon_id'];
     }
+    // Switch fields used in report if $speciesOnly set.
+    $distinctOnField = $speciesOnly ? 'taxon.species_taxon_id' : 'taxon.accepted_taxon_id';
+    $acceptedNameField = $speciesOnly ? 'taxon.species' : 'taxon.accepted_name';
+    $vernacularNameField = $speciesOnly ? 'taxon.species_vernacular' : 'taxon.vernacular_name';
     $this->applyFilters($filters, $extraFilters, $extraFiltersCacheKeys);
     $request = <<<JSON
 {
@@ -298,7 +303,7 @@ JSON;
     "taxa": {
       "terms" : {
         "size": 10000,
-        "field": "taxon.accepted_taxon_id",
+        "field": "$distinctOnField",
         "order": {"_count": "desc"}
       },
       "aggs": {
@@ -312,8 +317,8 @@ JSON;
                 "taxon.order",
                 "taxon.family",
                 "taxon.group",
-                "taxon.accepted_name",
-                "taxon.vernacular_name",
+                "$acceptedNameField",
+                "$vernacularNameField",
                 "taxon.taxon_rank",
                 "taxon.taxon_meaning_id"
               ]

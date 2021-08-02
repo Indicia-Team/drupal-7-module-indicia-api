@@ -94,8 +94,10 @@ function indicia_api_advancedreports_get($reportName) {
         break;
 
       case 'recorded-taxa-list':
+        // @deprecated exclude_higher_taxa parameter - use species_only instead.
         $excludeHigherTaxa = isset($_GET['exclude_higher_taxa']) && $_GET['exclude_higher_taxa'] === 't' ? TRUE : FALSE;
-        echo json_encode($rm->getRecordedTaxaList($filters, $excludeHigherTaxa));
+        $speciesOnly = isset($_GET['species_only']) && $_GET['species_only'] === 't' ? TRUE : FALSE;
+        echo json_encode($rm->getRecordedTaxaList($filters, $excludeHigherTaxa || $speciesOnly));
         break;
 
       default:
